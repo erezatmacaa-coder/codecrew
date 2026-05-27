@@ -1,7 +1,5 @@
-import asyncio
 import json
-import time
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 from masa.core import Orchestrator
@@ -14,376 +12,495 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CodeCrew - Erez'in Ofisi</title>
+<title>CodeCrew - 3D Office</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background: #0a0a1a; color: #e0e0e0; font-family: 'Courier New', monospace;
-         display: flex; justify-content: center; padding: 10px; overflow-x: hidden; }
-  .game-wrap { max-width: 840px; width: 100%; }
-  .top-bar { display:flex; justify-content:space-between; align-items:center;
-             padding:8px 0; }
-  .top-bar h1 { font-size:18px; color:#ffe66d; text-shadow:0 0 10px #ffe66d44; }
-  .top-bar span { font-size:12px; color:#4ecdc4; }
-  canvas { display:block; margin:0 auto; border:2px solid #30363d; border-radius:6px;
-           image-rendering:pixelated; width:100%; max-width:800px; background:#16213e; }
-  .panel { background:#0f3460ee; border:2px solid #30363d; border-top:none;
-           padding:12px; border-radius:0 0 10px 10px; }
-  .task-row { display:flex; gap:8px; }
-  .task-row input { flex:1; padding:10px 14px; border-radius:6px;
-                    border:1px solid #30363d; background:#16213e; color:#e0e0e0;
-                    font-size:14px; font-family:inherit; }
-  .task-row input:focus { outline:none; border-color:#ffe66d; }
-  .task-row button { padding:10px 24px; border-radius:6px; border:none;
-                     background:#ffe66d; color:#0a0a1a; font-size:14px;
-                     cursor:pointer; font-weight:bold; font-family:inherit; }
-  .task-row button:hover { background:#fff3a0; }
-  .task-row button:disabled { opacity:0.4; cursor:not-allowed; }
-  #log { margin-top:10px; max-height:180px; overflow-y:auto; padding:8px;
-         background:#16213e; border-radius:4px; font-size:12px; line-height:1.5;
-         display:none; }
-  .log-msg { padding:3px 0; border-bottom:1px solid #1a1a2e; }
-  .monitor { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;
-             font-size:11px; color:#8892b0; }
-  .monitor span { padding:2px 8px; border-radius:10px; background:#16213e;
-                  border:1px solid #30363d; }
-  .dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:4px; }
-  .dot.idle { background:#555; }
-  .dot.busy { background:#e94560; animation:pulse 0.6s infinite; }
-  .dot.done { background:#4ecca3; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  ::-webkit-scrollbar { width:3px; }
-  ::-webkit-scrollbar-track { background:#16213e; }
-  ::-webkit-scrollbar-thumb { background:#ffe66d; border-radius:2px; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#000;overflow:hidden;font-family:'Segoe UI',sans-serif}
+  canvas{display:block}
+  #ui{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+      width:90%;max-width:700px;z-index:10}
+  .panel{background:rgba(15,15,30,0.92);border:1px solid rgba(255,255,255,0.1);
+         border-radius:12px;padding:14px 18px;backdrop-filter:blur(10px)}
+  .row{display:flex;gap:10px}
+  .row input{flex:1;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);
+             background:rgba(0,0,0,0.4);color:#fff;font-size:15px;outline:none}
+  .row input:focus{border-color:#ffe66d}
+  .row input::placeholder{color:#666}
+  .row button{padding:10px 24px;border-radius:8px;border:none;background:#ffe66d;
+              color:#000;font-size:15px;font-weight:700;cursor:pointer}
+  .row button:hover{background:#fff3a0}
+  .row button:disabled{opacity:0.4;cursor:default}
+  #info{position:absolute;top:16px;left:50%;transform:translateX(-50%);
+        z-index:10;text-align:center;pointer-events:none}
+  #info h1{font-size:20px;color:#ffe66d;text-shadow:0 0 20px rgba(255,230,109,0.3);
+           letter-spacing:2px}
+  #info p{font-size:12px;color:#888;margin-top:4px}
+  #log{position:absolute;top:70px;right:16px;z-index:10;width:280px;max-height:400px;
+       overflow-y:auto;pointer-events:none}
+  .msg{padding:6px 10px;margin-bottom:4px;border-radius:6px;
+       background:rgba(15,15,30,0.8);border-left:3px solid #ffe66d;
+       font-size:12px;color:#ccc;line-height:1.4;opacity:0;transform:translateX(20px);
+       animation:fadeIn 0.4s forwards}
+  .msg b{color:#fff}
+  @keyframes fadeIn{to{opacity:1;transform:translateX(0)}}
+  #hud{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);
+       z-index:10;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .tag{padding:4px 10px;border-radius:20px;background:rgba(15,15,30,0.8);
+       border:1px solid rgba(255,255,255,0.1);font-size:11px;color:#aaa;
+       display:flex;align-items:center;gap:4px}
+  .tag .dot{width:6px;height:6px;border-radius:50%}
+  .tag .idle{background:#555}
+  .tag .busy{background:#e94560;animation:pulse 0.6s infinite}
+  .tag .done{background:#4ecca3}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+  ::-webkit-scrollbar{width:3px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#ffe66d44;border-radius:2px}
 </style>
 </head>
 <body>
-<div class="game-wrap">
-  <div class="top-bar">
-    <h1>EREZ'in OFISI</h1>
-    <span>CodeCrew v1.0</span>
-  </div>
-  <canvas id="c" width="800" height="600"></canvas>
-  <div class="panel">
-    <div class="task-row">
-      <input type="text" id="t" placeholder="proje gorevi tanimla..." autofocus>
-      <button id="b" onclick="baslat()">GONDER</button>
-    </div>
-    <div class="monitor" id="mon"></div>
-    <div id="log"></div>
-  </div>
-</div>
+<div id="info"><h1>✦ EREZ'in OFISI ✦</h1><p>fare ile surukle • zoom yap • 360° dolas</p></div>
+<div id="hud"></div>
+<div id="log"></div>
+<div id="ui">
+<div class="panel">
+<div class="row">
+<input type="text" id="t" placeholder="proje gorevini yaz..." autofocus>
+<button id="btn" onclick="baslat()">GONDER</button>
+</div></div></div>
 
-<script>
-const EMOJIS = {"Alp":"🧠","Cem":"💻","Rusty":"👁️","Testo":"🧪","Bug":"🐛","Devina":"🚀","Doc":"📖","Ideator":"💡"};
-const ROLS = {"Alp":"Lider","Cem":"Dev","Rusty":"Review","Testo":"Test","Bug":"Hunter","Devina":"DevOps","Doc":"Doc","Ideator":"Idea"};
-const PALET = {alp:["#e94560","#4ecdc4","#1a1a2e"], cem:["#2ecc71","#27ae60","#1a1a2e"],
-  rusty:["#95a5a6","#7f8c8d","#1a1a2e"], testo:["#9b59b6","#8e44ad","#1a1a2e"],
-  bug:["#e74c3c","#c0392b","#1a1a2e"], devina:["#3498db","#2980b9","#1a1a2e"],
-  doc:["#ecf0f1","#bdc3c7","#1a1a2e"], ideator:["#f1c40f","#f39c12","#1a1a2e"]};
-const KEYS=Object.keys(PALET);
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const ROOMS = {
-  meeting:{x:9,y:1,w:7,h:4,color:"#4ecdc4",label:"TOPLANTI"},
-  cem:{x:1,y:1,w:4,h:3,color:"#2ecc71",label:"CEM"},
-  alp:{x:6,y:1,w:3,h:3,color:"#4ecdc4",label:"ALP"},
-  devina:{x:17,y:1,w:4,h:3,color:"#3498db",label:"DEVINA"},
-  rusty:{x:1,y:5,w:4,h:3,color:"#95a5a6",label:"RUSTY"},
-  testo:{x:6,y:5,w:4,h:3,color:"#9b59b6",label:"TESTO"},
-  bug:{x:11,y:5,w:4,h:3,color:"#e74c3c",label:"BUG"},
-  doc:{x:16,y:5,w:4,h:3,color:"#bdc3c7",label:"DOC"},
-  ideator:{x:6,y:9,w:4,h:3,color:"#f1c40f",label:"IDEATOR"},
-  erez:{x:1,y:9,w:5,h:4,color:"#ffe66d",label:"EREZ (PATRON)"},
-  koridor:{x:11,y:9,w:9,h:4,color:"#1a1a3e",label:""},
+const AGENT_DATA = """ + json.dumps([
+    {"name": a["name"], "emoji": a["emoji"], "role": a["role"]}
+    for a in AGENTS
+], ensure_ascii=False) + """;
+
+const COLORS = {
+  Alp:0x4ecdc4, Cem:0x2ecc71, Rusty:0x95a5a6, Testo:0x9b59b6,
+  Bug:0xe74c3c, Devina:0x3498db, Doc:0xecf0f1, Ideator:0xf1c40f
 };
 
-const AGENT_ROOM = {Alp:"alp",Cem:"cem",Rusty:"rusty",Testo:"testo",
-  Bug:"bug",Devina:"devina",Doc:"doc",Ideator:"ideator"};
+const ROOMS = {
+  Alp:{pos:[-4,0,7]}, Cem:{pos:[-8,0,7]}, Devina:{pos:[4,0,7]},
+  Rusty:{pos:[-8,0,-7]}, Testo:{pos:[-4,0,-7]}, Bug:{pos:[0,0,-7]},
+  Doc:{pos:[4,0,-7]}, Ideator:{pos:[8,0,7]},
+  Meeting:{pos:[0,0,0]}, Erez:{pos:[7,0,-7]}
+};
 
-let agents = {};
-["Alp","Cem","Rusty","Testo","Bug","Devina","Doc","Ideator"].forEach((n,i)=>{
-  const r = ROOMS[AGENT_ROOM[n]];
-  const px = (r.x+1)*32+8, py = (r.y+1)*32+8;
-  agents[n] = {
-    x:px, y:py, tx:px, ty:py, mx:px, my:py,
-    walk:0, walkDir:0, step:0,
-    col:PALET[KEYS[i]], emoji:EMOJIS[n],
-    say:"", sayT:0, state:"idle"
-  };
+// --- SCENE ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a1a);
+scene.fog = new THREE.Fog(0x0a0a1a, 25, 40);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 50);
+camera.position.set(14, 16, 14);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.prepend(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(window.innerWidth, window.innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.body.prepend(labelRenderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 5;
+controls.maxDistance = 30;
+controls.maxPolarAngle = Math.PI / 2.1;
+controls.target.set(0, 1, 0);
+
+// --- LIGHTS ---
+const ambient = new THREE.AmbientLight(0x404060, 0.4);
+scene.add(ambient);
+
+const hemi = new THREE.HemisphereLight(0x4ecdc4, 0x1a1a2e, 0.6);
+scene.add(hemi);
+
+const dir = new THREE.DirectionalLight(0xffeedd, 2);
+dir.position.set(10, 20, 5);
+dir.castShadow = true;
+dir.shadow.mapSize.width = 1024;
+dir.shadow.mapSize.height = 1024;
+dir.shadow.camera.near = 0.5;
+dir.shadow.camera.far = 30;
+dir.shadow.camera.left = -15;
+dir.shadow.camera.right = 15;
+dir.shadow.camera.top = 15;
+dir.shadow.camera.bottom = -15;
+scene.add(dir);
+
+const fill = new THREE.DirectionalLight(0x4ecdc4, 0.3);
+fill.position.set(-5, 10, -10);
+scene.add(fill);
+
+// --- FLOOR ---
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(26, 26),
+  new THREE.MeshStandardMaterial({color:0x1a1a2e, roughness:0.8, metalness:0.1})
+);
+floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// grid
+const grid = new THREE.GridHelper(26, 26, 0x4ecdc4, 0x303060);
+grid.position.y = 0.01;
+scene.add(grid);
+
+// --- BUILDING MATERIALS ---
+const wallMat = new THREE.MeshStandardMaterial({color:0x2a2a4a, roughness:0.6, metalness:0.1, transparent:true, opacity:0.3});
+const wallFrame = new THREE.MeshStandardMaterial({color:0x4a4a6a, roughness:0.5, metalness:0.2});
+const deskMat = new THREE.MeshStandardMaterial({color:0x5a4030, roughness:0.7});
+const deskTop = new THREE.MeshStandardMaterial({color:0x6a5040, roughness:0.6});
+const screenMat = new THREE.MeshStandardMaterial({color:0x1a1a2e, emissive:0x4ecdc4, emissiveIntensity:0.15});
+const chairMat = new THREE.MeshStandardMaterial({color:0x333355, roughness:0.5});
+const plantMat = new THREE.MeshStandardMaterial({color:0x2a5a1a});
+const potMat = new THREE.MeshStandardMaterial({color:0x6a4a3a});
+
+// --- FURNITURE FACTORY ---
+function makeDesk(x,z, rot=0, color=0x5a4030){
+  const g = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({color, roughness:0.7});
+  // legs
+  [[-1.2,-0.6],[1.2,-0.6],[-1.2,0.6],[1.2,0.6]].forEach(([lx,lz])=>{
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.15,0.7,0.15), m);
+    leg.position.set(lx,0.35,lz); leg.castShadow=true; g.add(leg);
+  });
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.8,0.08,1.4), new THREE.MeshStandardMaterial({color:color+0x111111, roughness:0.5}));
+  top.position.y=0.75; top.castShadow=true; top.receiveShadow=true; g.add(top);
+  g.position.set(x,0,z); g.rotation.y=rot; return g;
+}
+
+function makeMonitor(x,y,z, rot=0){
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.05,0.5), new THREE.MeshStandardMaterial({color:0x222233}));
+  base.position.y=0.025; g.add(base);
+  const stand = new THREE.Mesh(new THREE.BoxGeometry(0.08,0.4,0.08), new THREE.MeshStandardMaterial({color:0x333344}));
+  stand.position.y=0.25; g.add(stand);
+  const screen = new THREE.Mesh(new THREE.BoxGeometry(0.8,0.55,0.04), screenMat);
+  screen.position.y=0.5; g.add(screen);
+  // glow
+  const glow = new THREE.Mesh(new THREE.BoxGeometry(0.72,0.47,0.01), new THREE.MeshStandardMaterial({
+    color:0x4ecdc4, emissive:0x4ecdc4, emissiveIntensity:0.3, transparent:true, opacity:0.6
+  }));
+  glow.position.set(0,0.5,-0.03); g.add(glow);
+  g.position.set(x,y+0.75,z); g.rotation.y=rot; return g;
+}
+
+function makeChair(x,z, rot=0, color=0x333355){
+  const g = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({color, roughness:0.5});
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.6,0.08,8), m);
+  base.position.y=0.04; base.receiveShadow=true; g.add(base);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.5,6), new THREE.MeshStandardMaterial({color:0x444466}));
+  pole.position.y=0.3; g.add(pole);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7,0.06,0.7), new THREE.MeshStandardMaterial({color:color+0x222222, roughness:0.7}));
+  seat.position.y=0.55; seat.castShadow=true; g.add(seat);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.7,0.6,0.06), m);
+  back.position.set(0,0.85,-0.35); back.castShadow=true; g.add(back);
+  g.position.set(x,0,z); g.rotation.y=rot; return g;
+}
+
+function makePlant(x,z){
+  const g = new THREE.Group();
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.35,0.4,6), potMat);
+  pot.position.y=0.2; g.add(pot);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.05,0.6,4), new THREE.MeshStandardMaterial({color:0x3a6a2a}));
+  stem.position.y=0.6; g.add(stem);
+  for(let i=0;i<8;i++){
+    const a=i*Math.PI/4;
+    const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.2,0.35,4), new THREE.MeshStandardMaterial({color:0x3a8a2a}));
+    leaf.position.set(Math.cos(a)*0.15,0.85+Math.sin(i)*0.1,Math.sin(a)*0.15);
+    leaf.rotation.x=Math.cos(a)*0.4; leaf.rotation.z=Math.sin(a)*0.4;
+    g.add(leaf);
+  }
+  g.position.set(x,0,z); return g;
+}
+
+function makeRoomLabel(text, x, z, color='#4ecdc4'){
+  const d=document.createElement('div');
+  d.textContent=text; d.style.color=color; d.style.fontFamily='monospace';
+  d.style.fontSize='12px'; d.style.fontWeight='bold';
+  d.style.textShadow='0 0 10px rgba(0,0,0,0.8)';
+  d.style.background='rgba(0,0,0,0.5)'; d.style.padding='2px 8px';
+  d.style.borderRadius='4px'; d.style.border='1px solid '+color+'44';
+  const l=new CSS2DObject(d); l.position.set(x,2.8,z); return l;
+}
+
+// --- BUILD OFFICE ---
+// Room platforms
+Object.values(ROOMS).forEach(r => {
+  const plat = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.5, 3.5),
+    new THREE.MeshStandardMaterial({color:0x222244, roughness:0.7, transparent:true, opacity:0.5})
+  );
+  plat.rotation.x=-Math.PI/2;
+  plat.position.set(r.pos[0],0.02,r.pos[2]);
+  plat.receiveShadow=true;
+  scene.add(plat);
 });
 
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-
-// ---- DRAWING ----
-function drawTile(x,y,w,h,c){
-  ctx.fillStyle=c; ctx.fillRect(x,y,w,h);
-  ctx.strokeStyle="rgba(255,255,255,0.05)"; ctx.strokeRect(x,y,w,h);
-}
-
-function drawFloor(){
-  for(let y=0;y<19;y++) for(let x=0;x<25;x++)
-    drawTile(x*32,y*32,32,32,(x+y)%2===0?"#14142e":"#1a1a3e");
-}
-
-function drawRoom(r){
-  const rx=r.x*32, ry=r.y*32, rw=r.w*32, rh=r.h*32;
-  ctx.fillStyle=r.color+"18"; ctx.fillRect(rx,ry,rw,rh);
-  ctx.strokeStyle=r.color+"66"; ctx.lineWidth=2; ctx.strokeRect(rx,ry,rw,rh);
-  // label
-  if(r.label){
-    ctx.fillStyle=r.color; ctx.font="bold 10px monospace"; ctx.textAlign="center";
-    ctx.fillText(r.label, rx+rw/2, ry+rh-6);
+// Add furniture to each room
+Object.entries(ROOMS).forEach(([name, r]) => {
+  const [x, y, z] = r.pos;
+  if(name==='Meeting'){
+    // big table
+    const mt = new THREE.Mesh(new THREE.BoxGeometry(4,0.1,1.5), new THREE.MeshStandardMaterial({color:0x3a4a5a, roughness:0.5}));
+    mt.position.set(x,0.75,z); mt.castShadow=true; mt.receiveShadow=true; scene.add(mt);
+    [[-1.5,0],[1.5,0],[-1.5,-0.5],[1.5,-0.5]].forEach(([mx,mz])=>{
+      const ml = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.7,6), new THREE.MeshStandardMaterial({color:0x444466}));
+      ml.position.set(x+mx,0.35,z+mz); scene.add(ml);
+    });
+    // chairs around
+    [[2,0,0],[0,2,Math.PI/2],[-2,0,Math.PI],[0,-2,-Math.PI/2]].forEach(([cx,cz,cr])=>{
+      scene.add(makeChair(x+cx*0.7,z+cz*0.7, cr, 0x333355));
+    });
+    const label = makeRoomLabel('TOPLANTI', x, z, '#4ecdc4');
+    scene.add(label);
+  } else if(name==='Erez'){
+    // manager special desk
+    scene.add(makeDesk(x, z, 0, 0xffe66d));
+    scene.add(makeMonitor(x-0.6, 0, z-0.2));
+    scene.add(makeChair(x+0.6, z-0.2, Math.PI, 0x333355));
+    scene.add(makePlant(x-1.2, z+0.8));
+    const label = makeRoomLabel('EREZ (Patron)', x, z, '#ffe66d');
+    scene.add(label);
+  } else {
+    const c = COLORS[name] || 0x888888;
+    const cStr = '#'+c.toString(16).padStart(6,'0');
+    scene.add(makeDesk(x, z, 0, c));
+    scene.add(makeMonitor(x-0.6, 0, z-0.2));
+    scene.add(makeChair(x+0.6, z-0.2, Math.PI, 0x333355));
+    scene.add(makePlant(x-1.2, z+0.8));
+    const label = makeRoomLabel(name, x, z, cStr);
+    scene.add(label);
   }
-}
+});
 
-function drawDesk(x,y,c){
-  ctx.fillStyle=c+"88"; ctx.fillRect(x-14,y-6,28,16);
-  ctx.fillStyle=c; ctx.fillRect(x-12,y-4,24,12);
-  ctx.strokeStyle="#00000044"; ctx.lineWidth=1; ctx.strokeRect(x-12,y-4,24,12);
-  // laptop
-  ctx.fillStyle="#222"; ctx.fillRect(x-6,y-6,12,8);
-  ctx.fillStyle="#333"; ctx.fillRect(x-5,y-6,10,6);
-  ctx.fillStyle="#4ecdc4"; ctx.fillRect(x-3,y-5,6,4);
-  // screen glow
-  ctx.fillStyle="#4ecdc422"; ctx.fillRect(x-3,y-5,6,4);
-}
-
-function drawPlant(x,y){
-  ctx.fillStyle="#2d5016"; ctx.fillRect(x-3,y,6,10);
-  ctx.fillStyle="#3a7d1a"; ctx.beginPath(); ctx.arc(x,y-2,7,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle="#4a9d2a"; ctx.beginPath(); ctx.arc(x-4,y-4,4,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(x+4,y-4,4,0,Math.PI*2); ctx.fill();
-}
-
-function drawClock(x,y){
-  ctx.fillStyle="#333"; ctx.beginPath(); ctx.arc(x,y,6,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill();
-  ctx.strokeStyle="#333"; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+3,y-3); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+2,y+1); ctx.stroke();
-}
-
-function drawAgent(n, a){
-  const ax=Math.round(a.x), ay=Math.round(a.y);
-
-  // shadow
-  ctx.fillStyle="rgba(0,0,0,0.3)"; ctx.beginPath();
-  ctx.ellipse(ax, ay+16, 10, 4, 0, 0, Math.PI*2); ctx.fill();
-
-  // body bob
-  const bob = a.walk > 0 ? Math.sin(a.step*0.3)*2 : 0;
-
-  // legs
-  const legSwing = a.walk > 0 ? Math.sin(a.step*0.3)*4 : 0;
-  ctx.fillStyle = a.col[2];
-  ctx.fillRect(ax-7, ay+4+bob, 5, 10); // left leg
-  ctx.fillRect(ax+2, ay+4+bob, 5, 10); // right leg
+// --- AGENTS ---
+let meshes = {};
+AGENT_DATA.forEach(d => {
+  const g = new THREE.Group();
+  const c = COLORS[d.name] || 0x888888;
 
   // body
-  ctx.fillStyle = a.col[0];
-  ctx.beginPath(); ctx.roundRect(ax-10, ay-10+bob, 20, 18, 3); ctx.fill();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.5,0.8,8),
+    new THREE.MeshStandardMaterial({color:c, roughness:0.6}));
+  body.position.y=0.7; body.castShadow=true; g.add(body);
 
   // head
-  ctx.fillStyle = a.col[1];
-  ctx.beginPath(); ctx.arc(ax, ay-16+bob, 9, 0, Math.PI*2); ctx.fill();
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3,8,6),
+    new THREE.MeshStandardMaterial({color:0xf4c2c2, roughness:0.5}));
+  head.position.y=1.2; head.castShadow=true; g.add(head);
 
   // eyes
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(ax-4, ay-19+bob, 4, 4);
-  ctx.fillRect(ax+1, ay-19+bob, 4, 4);
-  ctx.fillStyle = "#111";
-  ctx.fillRect(ax-3, ay-18+bob, 2, 2);
-  ctx.fillRect(ax+2, ay-18+bob, 2, 2);
-
-  // mouth
-  ctx.fillStyle = "#111";
-  ctx.fillRect(ax-2, ay-12+bob, 4, 1);
-
-  // emoji badge
-  ctx.font = "9px monospace"; ctx.textAlign = "center";
-  ctx.fillText(a.emoji, ax, ay-30+bob);
-
-  // state dot
-  const dotC = a.state==="busy"?"#e94560":a.state==="done"?"#4ecca3":"#555";
-  ctx.fillStyle=dotC; ctx.beginPath(); ctx.arc(ax+14, ay-18, 3, 0, Math.PI*2); ctx.fill();
-
-  // speech
-  if(a.say && a.sayT>0){
-    const lines = wrap(a.say,22);
-    const lh=13, bw=Math.min(200, Math.max(80, lines.reduce((m,l)=>Math.max(m,ctx.measureText(l).width+16),0)));
-    const bh=lines.length*lh+10, bx=Math.max(0,Math.min(800-bw,ax-bw/2)), by=Math.max(4,ay-55-bh);
-    ctx.fillStyle="rgba(0,0,0,0.9)"; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,4); ctx.fill();
-    ctx.strokeStyle=a.col[0]; ctx.lineWidth=1; ctx.strokeRect(bx,by,bw,bh);
-    ctx.fillStyle="#fff"; ctx.font="10px monospace"; ctx.textAlign="center";
-    lines.forEach((l,i)=>ctx.fillText(l,bx+bw/2,by+12+i*lh));
-  }
-}
-
-function wrap(t,n){
-  const w=t.split(' '); const l=[]; let c='';
-  w.forEach(w=>{(c+' '+w).length>n? (l.push(c),c=w):c=c?c+' '+w:w;});
-  if(c) l.push(c); return l.length?l:[''];
-}
-
-function drawOffice(){
-  drawFloor();
-  Object.values(ROOMS).forEach(drawRoom);
-
-  // manager room special
-  const mr=ROOMS.erez;
-  ctx.strokeStyle="#ffe66d"; ctx.lineWidth=2; ctx.setLineDash([5,5]);
-  ctx.strokeRect(mr.x*32,mr.y*32,mr.w*32,mr.h*32); ctx.setLineDash([]);
-  ctx.fillStyle="#ffe66d22"; ctx.fillRect(mr.x*32,mr.y*32,mr.w*32,mr.h*32);
-  ctx.fillStyle="#ffe66d"; ctx.font="bold 16px monospace"; ctx.textAlign="center";
-  ctx.fillText(">>> EREZ <<<", mr.x*32+mr.w*16, mr.y*32+24);
-  ctx.font="11px monospace"; ctx.fillStyle="#ffe66d88";
-  ctx.fillText("PATRON / YONETICI", mr.x*32+mr.w*16, mr.y*32+40);
-  ctx.font="10px monospace"; ctx.fillText("--- makam ---", mr.x*32+mr.w*16, mr.y*32+mr.h*32-8);
-
-  // desks in rooms
-  Object.entries(ROOMS).forEach(([k,r])=>{
-    if(k==="koridor"||k==="meeting"||k==="erez") return;
-    drawDesk(r.x*32+r.w*8, r.y*32+r.h*12+8, r.color);
+  const eMat = new THREE.MeshStandardMaterial({color:0x222222});
+  [-0.1,0.1].forEach(ex=>{
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6), eMat);
+    eye.position.set(ex,1.25,0.28); g.add(eye);
   });
 
-  // meeting table
-  const mt=ROOMS.meeting;
-  ctx.fillStyle="#4ecdc444"; ctx.beginPath();
-  ctx.roundRect(mt.x*32+mt.w*8-24, mt.y*32+mt.h*8-10, 48, 20, 4); ctx.fill();
-  ctx.strokeStyle="#4ecdc4"; ctx.strokeRect(mt.x*32+mt.w*8-24, mt.y*32+mt.h*8-10, 48, 20);
+  // label above
+  const lbl = document.createElement('div');
+  lbl.textContent = d.emoji + ' ' + d.name;
+  lbl.style.color = '#fff';
+  lbl.style.fontSize = '11px';
+  lbl.style.fontWeight = 'bold';
+  lbl.style.textShadow = '0 0 8px rgba(0,0,0,0.9)';
+  lbl.style.background = 'rgba(0,0,0,0.6)';
+  lbl.style.padding = '2px 8px';
+  lbl.style.borderRadius = '12px';
+  lbl.style.border = '1px solid #' + c.toString(16).padStart(6,'0');
+  lbl.style.whiteSpace = 'nowrap';
+  const label = new CSS2DObject(lbl);
+  label.position.y = 1.7;
+  g.add(label);
 
-  // meeting chairs
-  for(let i=0;i<4;i++){
-    const cx=mt.x*32+mt.w*8-12+i*8, cy=mt.y*32+mt.h*8+18;
-    ctx.fillStyle="#333"; ctx.beginPath(); ctx.roundRect(cx-5,cy,10,8,2); ctx.fill();
+  // place at their room
+  const room = ROOMS[d.name];
+  if(room){
+    g.position.set(room.pos[0], 0, room.pos[2]);
   }
 
-  // Erez's desk (special - bigger)
-  const ex=mr.x*32+mr.w*8, ey=mr.y*32+60;
-  ctx.fillStyle="#ffe66d44"; ctx.fillRect(ex-22,ey-8,44,20);
-  ctx.fillStyle="#ffe66d"; ctx.fillRect(ex-20,ey-6,40,16);
-  ctx.fillStyle="#222"; ctx.fillRect(ex-10,ey-8,20,12);
-  ctx.fillStyle="#4ecdc4"; ctx.fillRect(ex-8,ey-7,16,8);
-  // laptop glow
-  ctx.fillStyle="#4ecdc444"; ctx.fillRect(ex-8,ey-7,16,8);
+  scene.add(g);
+  meshes[d.name] = g;
+});
 
-  // decor
-  drawPlant(ROOMS.cem.x*32+ROOMS.cem.w*32-20, ROOMS.cem.y*32+ROOMS.cem.h*32-20);
-  drawPlant(ROOMS.devina.x*32+ROOMS.devina.w*32-20, ROOMS.devina.y*32+ROOMS.devina.h*32-20);
-  drawPlant(ROOMS.erez.x*32+ROOMS.erez.w*32-20, ROOMS.erez.y*32+ROOMS.erez.h*32-20);
+// --- ANIMATION ---
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  labelRenderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-  drawClock(ROOMS.koridor.x*32+ROOMS.koridor.w*8, ROOMS.koridor.y*32+12);
-}
+let time = 0;
+function animate(){
+  requestAnimationFrame(animate);
+  time += 0.02;
+  controls.update();
 
-// ---- AGENT MOVEMENT ----
-function moveTo(name,tx,ty){
-  const a=agents[name]; if(!a)return;
-  a.tx=tx; a.ty=ty; a.walk=1;
-}
-
-function moveToRoom(name,key){
-  const r=ROOMS[key]; if(!r)return;
-  moveTo(name, r.x*32+r.w*8, r.y*32+r.h*12);
-}
-
-function updateMovement(){
-  Object.values(agents).forEach(a=>{
-    if(!a.walk) return;
-    const dx=a.tx-a.x, dy=a.ty-a.y, d=Math.sqrt(dx*dx+dy*dy);
-    if(d<1.5){ a.x=a.tx; a.y=a.ty; a.walk=0; a.step=0; return; }
-    if(dx>0) a.walkDir=1; else if(dx<0) a.walkDir=-1;
-    a.x+=dx*0.08; a.y+=dy*0.08;
-    a.step+=0.5;
+  // subtle agent bob
+  Object.values(meshes).forEach((m,i)=>{
+    m.position.y = Math.sin(time + i*0.8) * 0.02;
+    m.rotation.y += 0.002;
   });
+
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
 }
+animate();
 
-function say(name,text){
-  const a=agents[name]; if(!a)return;
-  a.say=text; a.sayT=180; a.state="busy";
-}
+// --- SSE INTEGRATION ---
+let agentStates = {};
+AGENT_DATA.forEach(d => agentStates[d.name] = 'idle');
 
-function stopSay(name){
-  const a=agents[name]; if(a) a.say="";
-}
-
-// ---- GAME LOOP ----
-function loop(){
-  updateMovement();
-  ctx.clearRect(0,0,800,600);
-  drawOffice();
-  Object.entries(agents).forEach(([n,a])=>{
-    if(a.sayT>0) a.sayT--;
-    drawAgent(n,a);
-  });
-  requestAnimationFrame(loop);
-}
-
-// polyfill
-if(!CanvasRenderingContext2D.prototype.roundRect){
-  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
-    this.moveTo(x+r,y); this.arcTo(x+w,y,x+w,y+h,r);
-    this.arcTo(x+w,y+h,x,y+h,r); this.arcTo(x,y+h,x,y,r);
-    this.arcTo(x,y,x+w,y,r);
-  };
-}
-
-// ---- SSE ----
-function baslat(){
-  const input=document.getElementById('t'), task=input.value.trim();
-  if(!task)return;
-  const btn=document.getElementById('b'); btn.disabled=true;
-
-  const log=document.getElementById('log'); log.innerHTML=''; log.style.display='block';
-
-  // agents to meeting
-  Object.keys(agents).forEach(n=>{
-    moveToRoom(n,"meeting");
-    agents[n].state="idle"; agents[n].say="";
-  });
-  updateMon();
-
-  const es=new EventSource('/stream?task='+encodeURIComponent(task));
-  es.onmessage=function(e){
-    const d=JSON.parse(e.data);
-    if(d.type==='message'){
-      const a=agents[d.name];
-      if(a){
-        moveToRoom(d.name,"meeting");
-        say(d.name, d.message.substring(0,120));
-        updateMon();
-
-        const r=document.createElement('div'); r.className='log-msg';
-        r.innerHTML='<b>'+d.emoji+' '+d.name+':</b> '+esc(d.message.substring(0,150));
-        log.appendChild(r); log.scrollTop=log.scrollHeight;
-      }
-    } else if(d.type==='summary'){
-      Object.values(agents).forEach(a=>{a.state="done"; a.sayT=0;});
-      updateMon();
-      const r=document.createElement('div'); r.className='log-msg';
-      r.style.color='#4ecca3'; r.textContent='✓ Proje tamamlandi!';
-      log.appendChild(r);
-      // move agents back to rooms
-      Object.keys(agents).forEach(n=>moveToRoom(n,AGENT_ROOM[n]));
-    } else if(d.type==='done'){ btn.disabled=false; es.close(); }
-    else if(d.type==='error'){ btn.disabled=false; es.close(); }
-  };
-  es.onerror=function(){ btn.disabled=false; es.close(); };
-}
-
-function updateMon(){
-  const m=document.getElementById('mon');
-  m.innerHTML=Object.entries(agents).map(([n,a])=>{
-    const cls=a.state==="busy"?"busy":a.state==="done"?"done":"idle";
-    return `<span><span class="dot ${cls}"></span>${a.emoji} ${n}</span>`;
+function updateHUD(){
+  const h = document.getElementById('hud');
+  h.innerHTML = AGENT_DATA.map(d => {
+    const s = agentStates[d.name] || 'idle';
+    return `<span class="tag"><span class="dot ${s}"></span>${d.emoji} ${d.name}</span>`;
   }).join('');
+}
+updateHUD();
+
+function moveTo(name, tx, tz){
+  const m = meshes[name];
+  if(m){
+    m.position.x = tx;
+    m.position.z = tz;
+  }
+}
+
+function moveToRoom(name, rname){
+  const room = ROOMS[rname];
+  if(room) moveTo(name, room.pos[0], room.pos[2]);
+}
+
+function sayAgent(name, text){
+  agentStates[name] = 'busy';
+  updateHUD();
+  moveToRoom(name, 'Meeting');
+  const m = meshes[name];
+  if(m){
+    // add floating speech
+    const existing = m.userData.speech;
+    if(existing){ m.remove(existing); }
+
+    const d = document.createElement('div');
+    d.textContent = text.substring(0,60);
+    d.style.color = '#fff';
+    d.style.fontSize = '10px';
+    d.style.background = 'rgba(0,0,0,0.85)';
+    d.style.padding = '4px 10px';
+    d.style.borderRadius = '8px';
+    d.style.border = '1px solid #ffe66d44';
+    d.style.maxWidth = '160px';
+    d.style.whiteSpace = 'normal';
+    d.style.wordWrap = 'break-word';
+    d.style.fontFamily = 'monospace';
+    d.style.lineHeight = '1.3';
+    const lbl = new CSS2DObject(d);
+    lbl.position.y = 2.5;
+    m.add(lbl);
+    m.userData.speech = lbl;
+  }
+}
+
+function clearSpeech(name){
+  const m = meshes[name];
+  if(m && m.userData.speech){
+    m.remove(m.userData.speech);
+    m.userData.speech = null;
+  }
+}
+
+function resetAgents(){
+  AGENT_DATA.forEach(d => {
+    agentStates[d.name] = 'idle';
+    clearSpeech(d.name);
+    const room = ROOMS[d.name];
+    if(room) moveTo(d.name, room.pos[0], room.pos[2]);
+  });
+  updateHUD();
+}
+
+function doneAgents(){
+  AGENT_DATA.forEach(d => {
+    agentStates[d.name] = 'done';
+    clearSpeech(d.name);
+    const room = ROOMS[d.name];
+    if(room) moveTo(d.name, room.pos[0], room.pos[2]);
+  });
+  updateHUD();
+}
+
+// --- START ---
+function baslat(){
+  const inp = document.getElementById('t');
+  const task = inp.value.trim();
+  if(!task) return;
+  const btn = document.getElementById('btn');
+  btn.disabled = true;
+  resetAgents();
+
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+
+  const es = new EventSource('/stream?task=' + encodeURIComponent(task));
+  es.onmessage = function(e){
+    const data = JSON.parse(e.data);
+    if(data.type === 'message'){
+      sayAgent(data.name, data.message);
+      const row = document.createElement('div');
+      row.className = 'msg';
+      row.innerHTML = '<b>'+data.emoji+' '+data.name+':</b> '+esc(data.message.substring(0,150));
+      log.appendChild(row);
+      log.scrollTop = log.scrollHeight;
+    } else if(data.type === 'summary'){
+      doneAgents();
+      const row = document.createElement('div');
+      row.className = 'msg';
+      row.style.borderLeftColor = '#4ecca3';
+      row.innerHTML = '<b>✓ Proje tamamlandi</b>';
+      log.appendChild(row);
+    } else if(data.type === 'done'){
+      btn.disabled = false;
+      es.close();
+    } else if(data.type === 'error'){
+      btn.disabled = false;
+      es.close();
+    }
+  };
+  es.onerror = function(){
+    btn.disabled = false;
+    es.close();
+  };
 }
 
 function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 document.getElementById('t').addEventListener('keydown',e=>{if(e.key==='Enter')baslat();});
-
-loop();
-updateMon();
+window.baslat = baslat;
 </script>
 </body>
 </html>"""

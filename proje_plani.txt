@@ -1,0 +1,7 @@
+Proje klasör yapısı:
+- hesap_makinesi
+  - src
+    - main.py
+  - tests
+    - test_main.py
+  - README.md
