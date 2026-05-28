@@ -25,7 +25,7 @@ TOOL = {
 
 def execute(args):
     command = args["command"]
-    timeout = args.get("timeout", 30)
+    timeout = args.get("timeout", 8)
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True, timeout=timeout,
